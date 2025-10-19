@@ -44,6 +44,8 @@ contract TreasuryContract is ReentrancyGuard, Ownable {
     uint256 public currentDividendRound; // 当前分红轮次
     uint256 public lastDistributionAmount; // 上次分配金额
 
+    bool public paused = false;         // 暂停状态
+
     // 映射
     mapping(address => ClaimableDividend) public claimableDividends;
     mapping(uint256 => DividendRecord) public dividendHistory;
@@ -55,6 +57,19 @@ contract TreasuryContract is ReentrancyGuard, Ownable {
     event DividendClaimed(address indexed holder, uint256 amount, uint256 round);
     event CreatorPaid(uint256 amount, uint256 round);
     event DividendConfigUpdated(uint256 threshold, uint8 holderPercentage, uint8 creatorPercentage);
+    event Paused(address account);
+    event Unpaused(address account);
+
+    // 修饰符
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
+    }
+
+    modifier whenPaused() {
+        require(paused, "Contract is not paused");
+        _;
+    }
 
     /**
      * @dev 构造函数
@@ -86,7 +101,7 @@ contract TreasuryContract is ReentrancyGuard, Ownable {
     /**
      * @dev 接收ETH收入
      */
-    receive() external payable nonReentrant {
+    receive() external payable nonReentrant whenNotPaused {
         require(msg.value > 0, "Amount must be greater than 0");
 
         totalRevenue += msg.value;
@@ -132,29 +147,57 @@ contract TreasuryContract is ReentrancyGuard, Ownable {
     /**
      * @dev 代币持有者领取分红
      */
-    function claimDividend() external nonReentrant {
-        require(claimableDividends[msg.sender].amount > 0, "No dividend to claim");
-        require(!claimableDividends[msg.sender].claimed, "Dividend already claimed");
+    function claimDividend() external nonReentrant whenNotPaused {
+        uint256 dividendRound = currentDividendRound - 1; // 最新已完成的分红轮次
+        require(dividendRound > 0, "No dividend rounds available");
+        require(lastClaimedRound[msg.sender] < dividendRound, "Already claimed latest dividend");
 
-        uint256 amount = claimableDividends[msg.sender].amount;
-        uint256 round = claimableDividends[msg.sender].dividendRound;
+        // 获取分红记录
+        DividendRecord memory record = dividendHistory[dividendRound];
+        require(record.holderAmount > 0, "No holder dividend in this round");
 
-        claimableDividends[msg.sender].claimed = true;
-        lastClaimedRound[msg.sender] = round;
+        // 实时计算用户应得分红
+        uint256 userBalance = creatorToken.balanceOf(msg.sender);
+        require(userBalance > 0, "No tokens held");
 
-        payable(msg.sender).transfer(amount);
+        uint256 totalSupply = creatorToken.totalSupply();
+        uint256 userDividend = (record.holderAmount * userBalance) / totalSupply;
 
-        emit DividendClaimed(msg.sender, amount, round);
+        require(userDividend > 0, "Dividend amount too small");
+        require(address(this).balance >= userDividend, "Insufficient contract balance");
+
+        // 更新领取记录
+        lastClaimedRound[msg.sender] = dividendRound;
+
+        // 转账
+        payable(msg.sender).transfer(userDividend);
+
+        emit DividendClaimed(msg.sender, userDividend, dividendRound);
     }
 
     /**
      * @dev 获取用户可领取的分红
      */
     function getClaimableDividend(address holder) external view returns (uint256) {
-        if (claimableDividends[holder].claimed || claimableDividends[holder].amount == 0) {
+        uint256 dividendRound = currentDividendRound - 1;
+        if (dividendRound == 0 || lastClaimedRound[holder] >= dividendRound) {
             return 0;
         }
-        return claimableDividends[holder].amount;
+
+        // 获取分红记录
+        DividendRecord memory record = dividendHistory[dividendRound];
+        if (record.holderAmount == 0) {
+            return 0;
+        }
+
+        // 计算用户应得分红
+        uint256 userBalance = creatorToken.balanceOf(holder);
+        if (userBalance == 0) {
+            return 0;
+        }
+
+        uint256 totalSupply = creatorToken.totalSupply();
+        return (record.holderAmount * userBalance) / totalSupply;
     }
 
     /**
@@ -241,11 +284,12 @@ contract TreasuryContract is ReentrancyGuard, Ownable {
         dividendHistory[currentDividendRound] = record;
 
         // 预计算所有代币持有者的可领取分红
+        // 注意：由于gas限制，我们采用Pull模式，持有人主动领取时计算
+        // 这里不做预计算，在claimDividend时实时计算
         uint256 totalSupply = creatorToken.totalSupply();
-        if (totalSupply > 0) {
-            // 注意：这里只计算了当前轮次，实际应用中可能需要更复杂的逻辑
-            // 为简化，我们假设所有代币持有者按比例分配
-            // 在实际应用中，可能需要遍历所有持有者或使用快照机制
+        if (totalSupply > 0 && holderAmount > 0) {
+            // 记录本轮次的分红池金额，供后续领取使用
+            // 实际分红金额将在用户领取时根据其代币持有比例计算
         }
 
         // 支付给创作者
@@ -303,5 +347,23 @@ contract TreasuryContract is ReentrancyGuard, Ownable {
             totalRevenue - distributedRevenue,
             address(this).balance
         );
+    }
+
+    /**
+     * @dev 暂停合约（仅所有者）
+     */
+    function pause() external onlyOwner {
+        require(!paused, "Contract is already paused");
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /**
+     * @dev 恢复合约（仅所有者）
+     */
+    function unpause() external onlyOwner {
+        require(paused, "Contract is not paused");
+        paused = false;
+        emit Unpaused(msg.sender);
     }
 }

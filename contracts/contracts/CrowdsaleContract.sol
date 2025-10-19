@@ -25,6 +25,8 @@ contract CrowdsaleContract is ReentrancyGuard, Ownable {
         address creator;              // 创作者地址
         string tokenName;             // 代币名称
         string tokenSymbol;           // 代币符号
+        uint8 holderPercentage;       // 代币持有者分红比例 (1-100)
+        uint8 creatorPercentage;      // 创作者分红比例 (1-100)
     }
 
     // 投资记录
@@ -69,6 +71,8 @@ contract CrowdsaleContract is ReentrancyGuard, Ownable {
         require(_config.totalSupply > 0, "Total supply must be greater than 0");
         require(_config.crowdsaleAllocation > 0 && _config.crowdsaleAllocation <= 100, "Invalid allocation percentage");
         require(_config.creator != address(0), "Invalid creator address");
+        require(_config.holderPercentage + _config.creatorPercentage == 100, "Dividend percentages must sum to 100");
+        require(_config.holderPercentage > 0 && _config.creatorPercentage > 0, "Dividend percentages must be greater than 0");
 
         config = _config;
         state = ProjectState.PENDING;
@@ -191,8 +195,8 @@ contract CrowdsaleContract is ReentrancyGuard, Ownable {
         treasuryContract = new TreasuryContract(
             address(creatorToken),
             config.creator,
-            40, // 40% 给代币持有者 (可根据需求调整)
-            60  // 60% 给创作者
+            config.holderPercentage,   // 使用配置中的代币持有者分红比例
+            config.creatorPercentage   // 使用配置中的创作者分红比例
         );
 
         // 启用代币分红功能

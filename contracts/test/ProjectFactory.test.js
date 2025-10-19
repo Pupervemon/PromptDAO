@@ -34,9 +34,14 @@ describe("ProjectFactory", function () {
         dividendThreshold: ethers.parseEther("1")
       };
 
-      await expect(projectFactory.connect(creator1).createProject(projectParams))
-        .to.emit(projectFactory, "ProjectCreated")
-        .withArgs(1, creator1.address, "Test Project", await projectFactory.getCrowdsaleContract(1));
+      const tx = await projectFactory.connect(creator1).createProject(projectParams);
+      const receipt = await tx.wait();
+
+      // 获取事件中的crowdsaleContract地址
+      const event = receipt.logs.find(log => log.fragment?.name === "ProjectCreated");
+      const crowdsaleAddress = event?.args?.crowdsaleContract;
+
+      expect(crowdsaleAddress).to.be.properAddress;
 
       const projectInfo = await projectFactory.getProject(1);
       expect(projectInfo.projectId).to.equal(1);

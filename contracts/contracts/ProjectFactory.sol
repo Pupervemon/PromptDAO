@@ -94,7 +94,9 @@ contract ProjectFactory is Ownable, ReentrancyGuard {
             crowdsaleAllocation: params.crowdsaleAllocation,
             creator: msg.sender,
             tokenName: params.tokenName,
-            tokenSymbol: params.tokenSymbol
+            tokenSymbol: params.tokenSymbol,
+            holderPercentage: params.holderPercentage,
+            creatorPercentage: params.creatorPercentage
         });
 
         // 部署众筹合约

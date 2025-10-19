@@ -15,7 +15,7 @@ async function main() {
     const creatorToken = await CreatorToken.deploy(
       "PromptDAO Creator Token",
       "PDCT",
-      ethers.parseEther("1000000"), // 1M tokens
+      1000000, // 1M tokens (uint256, not wei)
       deployer.address
     );
     await creatorToken.waitForDeployment();
